@@ -102,7 +102,7 @@ WORLD_DICT = {
     - No real-world organizations"""
 }
 
-# Actor Types
+# Actor Types (don't want this)
 ACTOR_TYPES = {
     "allies": {
         "description": "Characters with positive relationships",
