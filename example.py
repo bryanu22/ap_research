@@ -1,17 +1,19 @@
 # example.py
 import asyncio
 import os
-from game_theory_llm import PayoffMatrix, StoryGenerator, APIClient
+from game_theory_llm import PayoffMatrix, StoryGenerator, APIClient, UltimatumGame, UltimatumStoryGenerator
 
 async def main():
     # Create a Prisoner's Dilemma matrix
+    '''
     matrix = PayoffMatrix([
         (0, 0),       # Both choose A
         (100, -50),   # Agent 1 A, Agent 2 B
         (-50, 100),   # Agent 1 B, Agent 2 A
         (75, 75)      # Both choose B
     ])
-
+    '''
+    game = UltimatumGame(total_amount=100)
     # Initialize the API client
     api_client = APIClient()
     
@@ -20,11 +22,12 @@ async def main():
     
     # Generate stories
     stories = await generator.generate_stories(
-        payoff_matrix=matrix,
+        #payoff_matrix=matrix,
+        game=game,
         topic="international business",
         world_type="real world",
         actor_type="enemies",
-        n_stories=2
+        n_stories=1
     )
     
     # Print results
