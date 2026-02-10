@@ -68,7 +68,27 @@ class UltimatumGame(Game):
                 0: 0,
                 1: 0,
             }
+@dataclass
+class PublicGoodsGame(Game):
+    num_players: int = 4
+    endowment: int = 20
+    multiplier: float = 1.6
+    
+    name: str = "Public Goods Game"
 
+    def get_actions(self, player_id: int):
+        return list(range(self.endowment + 1))
+
+    def compute_payoffs(self, actions: Dict[int, Any]):
+        total_contribution = sum(actions.values())
+        pool_value = total_contribution * self.multiplier
+        per_player_share = pool_value / self.num_players
+        
+        payoffs = {}
+        for player_id, contribution in actions.items():
+            payoffs[player_id] = self.endowment - contribution + per_player_share
+        
+        return payoffs
 @dataclass
 class Story:
     """A generated story and its metadata."""

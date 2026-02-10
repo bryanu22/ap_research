@@ -1,14 +1,16 @@
 # game_theory_llm/__init__.py
-from .models import PayoffMatrix, Story, UltimatumGame
-from .generator import StoryGenerator, UltimatumStoryGenerator, BatchGenerationResult
+from .models import PayoffMatrix, Story, UltimatumGame, PublicGoodsGame
+from .generator import StoryGenerator, UltimatumStoryGenerator, PGGStoryGenerator, BatchGenerationResult
 from .api import APIClient
 
 __all__ = [
     'PayoffMatrix',
     'Story',
-    'UltimatumGame',           
+    'UltimatumGame',
+    'PublicGoodsGame',
     'StoryGenerator',
-    'UltimatumStoryGenerator',  
+    'UltimatumStoryGenerator',
+    'PGGStoryGenerator',
     'BatchGenerationResult',
     'APIClient'
 ]
