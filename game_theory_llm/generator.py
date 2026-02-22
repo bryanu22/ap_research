@@ -2,7 +2,7 @@
 from typing import List, Tuple, Optional
 import re
 import logging
-from .models import PayoffMatrix, Story, UltimatumGame, PublicGoodsGame
+from .models import PayoffMatrix, Story, UltimatumGame, PublicGoodsGame, Stakes
 from .api import APIClient
 from .config import WORLD_DICT, ACTOR_TYPES, TOPICS
 import asyncio
@@ -12,14 +12,23 @@ import textwrap
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class BatchGenerationResult:
     stories: List[Story]
     summaries: List[str]
     unique_prompt: str
 
+
+_STAKES_LABEL: dict[Stakes, str] = {
+    Stakes.LOW:    "low-stakes (small, everyday amounts)",
+    Stakes.MEDIUM: "medium-stakes (meaningful but not life-changing amounts)",
+    Stakes.HIGH:   "high-stakes (large, consequential amounts)",
+}
+
+
 class StoryGenerator:
-    
+
     def __init__(self, api_client: APIClient):
         self.api_client = api_client
         logger.info("StoryGenerator initialized")
@@ -37,7 +46,7 @@ class StoryGenerator:
 
         try:
             summary = await self.api_client.generate(prompt.format(story=story), model="llama")
-            summary =  summary["llama"]
+            summary = summary["llama"]
             logger.debug(f"Generated summary: {summary[:100]}...")
             return summary.strip()
         except Exception as e:
@@ -48,7 +57,7 @@ class StoryGenerator:
         logger.debug(f"Generating unique prompt from {len(summaries)} summaries")
         if not summaries:
             return ""
-            
+
         all_summaries = "\n".join(f"{i+1}. {summary}" for i, summary in enumerate(summaries))
         return f"""Previous story summaries (avoid reusing elements from these):
         {all_summaries}
@@ -62,7 +71,7 @@ class StoryGenerator:
         world_type: str,
         actor_type: str,
         unique_prompt: str = "",
-        number_of_stories: int = 10
+        number_of_stories: int = 10,
     ) -> str:
         logger.debug("Creating query prompt")
         prompt = f"""Write {number_of_stories} unique stories about a scenario involving two agents and their possible actions.
@@ -102,7 +111,7 @@ class StoryGenerator:
         Provide your justification for your decision inside <justification></justification> tags.
         Then, output your decision, either: <decision>B</decision> or <decision>A</decision>. Be sure to pay attention to which action is labeled as A and which is labeled as B, as they might not be in alphabetical order. 
         </toadd>"""
-        
+
         prompt = textwrap.dedent(prompt)
         logger.debug(f"Created prompt of length {len(prompt)}")
         return prompt
@@ -114,25 +123,27 @@ class StoryGenerator:
         world_type: str,
         actor_type: str,
         unique_prompt: str = "",
-        number_of_stories: int = 10
+        number_of_stories: int = 10,
     ) -> BatchGenerationResult:
         logger.info("Generating batch of stories")
-        prompt = self.create_query(payoff_matrix, topic, world_type, actor_type, unique_prompt, number_of_stories)
-        
+        prompt = self.create_query(
+            payoff_matrix, topic, world_type, actor_type, unique_prompt, number_of_stories
+        )
+
         try:
             content = await self.api_client.generate(prompt, model="llama")
             content = content["llama"]
             logger.debug(f"Generated content length: {len(content)}")
-            
+
             story_pattern = r'<story>(.*?)</story>'
             raw_stories = re.findall(story_pattern, content, re.DOTALL)
             logger.info(f"Extracted {len(raw_stories)} stories from response")
-            
+
             if not raw_stories:
                 logger.warning("No stories found in generated content")
                 logger.debug(f"Content preview: {content[:500]}...")
                 return BatchGenerationResult([], [], "")
-            
+
             stories = []
             for story_content in raw_stories:
                 decision = self._extract_decision(story_content)
@@ -142,19 +153,19 @@ class StoryGenerator:
                     world_type=world_type,
                     actor_type=actor_type,
                     prompt=prompt,
-                    decision=decision
+                    decision=decision,
                 )
                 stories.append(story)
-            
+
             summaries = await asyncio.gather(
                 *[self.generate_story_summary(story.content) for story in stories]
             )
             print(f"Summaries: {summaries}")
             new_unique_prompt = self.generate_unique_prompt(summaries)
             logger.info(f"Successfully generated batch with {len(stories)} stories")
-            
+
             return BatchGenerationResult(stories, summaries, new_unique_prompt)
-            
+
         except Exception as e:
             logger.error(f"Error generating batch: {str(e)}")
             return BatchGenerationResult([], [], "")
@@ -166,38 +177,36 @@ class StoryGenerator:
         world_type: str,
         actor_type: str,
         n_stories: int = 100,
-        batch_size: int = 10
+        batch_size: int = 10,
     ) -> List[Story]:
         logger.info(f"Starting generation of {n_stories} stories in batches of {batch_size}")
-        
+
         if topic not in TOPICS:
             raise ValueError(f"Invalid topic. Must be one of: {TOPICS}")
         if world_type not in WORLD_DICT:
             raise ValueError(f"Invalid world type. Must be one of: {list(WORLD_DICT.keys())}")
         if actor_type not in ACTOR_TYPES:
             raise ValueError(f"Invalid actor type. Must be one of: {list(ACTOR_TYPES.keys())}")
-        
-        all_stories = []
-        all_summaries = []
+
+        all_stories: List[Story] = []
+        all_summaries: List[str] = []
         unique_prompt = ""
-        
+
         n_batches = (n_stories + batch_size - 1) // batch_size
         logger.info(f"Will generate {n_batches} batches")
-        if n_stories < 10:
-            number_of_stories = n_stories
-        else:
-            number_of_stories = 10
+        number_of_stories = n_stories if n_stories < 10 else 10
+
         for batch_num in range(n_batches):
             logger.info(f"Generating batch {batch_num + 1}/{n_batches}")
             batch_result = await self.generate_batch(
-                payoff_matrix, 
-                topic, 
-                world_type, 
-                actor_type, 
+                payoff_matrix,
+                topic,
+                world_type,
+                actor_type,
                 unique_prompt,
-                number_of_stories
+                number_of_stories,
             )
-            
+
             if batch_result.stories:
                 all_stories.extend(batch_result.stories)
                 all_summaries.extend(batch_result.summaries)
@@ -205,22 +214,22 @@ class StoryGenerator:
                 logger.info(f"Added {len(batch_result.stories)} stories from batch {batch_num + 1}")
             else:
                 logger.warning(f"Batch {batch_num + 1} generated no stories")
-            
+
             if len(all_stories) >= n_stories:
                 logger.info(f"Reached target number of stories ({n_stories})")
                 break
-        
+
         logger.info(f"Generation complete. Generated {len(all_stories)} stories total")
         return all_stories[:n_stories]
 
     def _extract_decision(self, text: str) -> Optional[str]:
         patterns = [
-            (r'<decision>\s*([AB])\s*</decision>', {'A': 'A', 'B': 'B'}),
-            (r'<decision>\s*([12])\s*</decision>', {'1': 'A', '2': 'B'}),
-            (r'<decision>\s*(\&{1,2})\s*</decision>', {'&': '&', '&&': '&&'}),
-            (r'<decision>\s*(yellow|green)\s*</decision>', {'yellow': 'A', 'green': 'B'}),
+            (r'<decision>\s*([AB])\s*</decision>',           {'A': 'A', 'B': 'B'}),
+            (r'<decision>\s*([12])\s*</decision>',            {'1': 'A', '2': 'B'}),
+            (r'<decision>\s*(\&{1,2})\s*</decision>',         {'&': '&', '&&': '&&'}),
+            (r'<decision>\s*(yellow|green)\s*</decision>',    {'yellow': 'A', 'green': 'B'}),
         ]
-        
+
         for pattern, mapping in patterns:
             match = re.search(pattern, text)
             if match:
@@ -229,13 +238,17 @@ class StoryGenerator:
                 if mapped_decision:
                     logger.debug(f"Extracted decision: {decision} -> mapped to: {mapped_decision}")
                     return mapped_decision
-        
+
         logger.warning("No valid decision pattern found in story")
         return None
 
 
+# ---------------------------------------------------------------------------
+# Ultimatum Game generator
+# ---------------------------------------------------------------------------
+
 class UltimatumStoryGenerator(StoryGenerator):
-    
+
     def create_query_ultimatum(
         self,
         game: UltimatumGame,
@@ -243,17 +256,18 @@ class UltimatumStoryGenerator(StoryGenerator):
         world_type: str,
         actor_type: str,
         unique_prompt: str = "",
-        number_of_stories: int = 10
+        number_of_stories: int = 10,
     ) -> str:
         logger.debug("Creating ultimatum query prompt")
-        total = game.total_amount
-        
+        total        = game.effective_total          # stakes-scaled pool
+        stakes_label = _STAKES_LABEL[game.stakes]
+
         prompt = f"""Write {number_of_stories} unique short stories involving two agents:
 one makes a monetary offer (the proposer) and the other accepts or rejects (the responder).
 Do not call this a game. Keep it natural and varied.
 
 Context:
-- Total amount to split: ${total}.
+- Total amount to split: ${total}. This is a {stakes_label} scenario — write the narrative register accordingly.
 - The proposer will choose an integer offer between $0 and ${total} inclusive.
 - The responder will either accept or reject the offer.
 - If the responder accepts, the proposer keeps (total - offer) and the responder gets the offer amount.
@@ -305,7 +319,7 @@ Example story ending:
         world_type: str,
         actor_type: str,
         unique_prompt: str = "",
-        number_of_stories: int = 10
+        number_of_stories: int = 10,
     ) -> BatchGenerationResult:
         logger.info("Generating UG batch of stories")
         prompt = self.create_query_ultimatum(
@@ -318,36 +332,34 @@ Example story ending:
             if isinstance(content, dict):
                 content = str(content)
             logger.debug(f"UG generated content length: {len(content)}")
-            
+
             story_pattern = r'<story>(.*?)</story>'
             raw_stories = re.findall(story_pattern, content, re.DOTALL)
             logger.info(f"Extracted {len(raw_stories)} stories for UG")
-            
+
             if not raw_stories:
                 logger.warning("No UG stories found")
                 return BatchGenerationResult([], [], "")
 
             stories = []
             for story_content in raw_stories:
-                offer, response = self._extract_ultimatum(story_content, game.total_amount)
-                decision_field = None
-                if offer is not None and response is not None:
-                    decision_field = f"{offer}:{response}"
-                
+                offer, response = self._extract_ultimatum(story_content, game.effective_total)
+                decision_field = f"{offer}:{response}" if offer is not None and response is not None else None
+
                 story = Story(
                     content=story_content.strip(),
                     topic=topic,
                     world_type=world_type,
                     actor_type=actor_type,
                     prompt=prompt,
-                    decision=decision_field
+                    decision=decision_field,
                 )
                 stories.append(story)
-            
+
             summaries = await asyncio.gather(
                 *[self.generate_story_summary(s.content) for s in stories]
             )
-            
+
             new_unique_prompt = self.generate_unique_prompt(summaries)
             logger.info(f"UG batch created {len(stories)} stories")
             return BatchGenerationResult(stories, summaries, new_unique_prompt)
@@ -363,10 +375,10 @@ Example story ending:
         world_type: str,
         actor_type: str,
         n_stories: int = 100,
-        batch_size: int = 10
+        batch_size: int = 10,
     ) -> List[Story]:
         logger.info(f"Starting UG generation of {n_stories} stories")
-        
+
         if topic not in TOPICS:
             raise ValueError(f"Invalid topic. Must be one of: {TOPICS}")
         if world_type not in WORLD_DICT:
@@ -374,26 +386,17 @@ Example story ending:
         if actor_type not in ACTOR_TYPES:
             raise ValueError(f"Invalid actor type. Must be one of: {list(ACTOR_TYPES.keys())}")
 
-        all_stories = []
+        all_stories: List[Story] = []
         unique_prompt = ""
         n_batches = (n_stories + batch_size - 1) // batch_size
-        
-        if n_stories < 10:
-            number_of_stories = n_stories
-        else:
-            number_of_stories = 10
+        number_of_stories = n_stories if n_stories < 10 else 10
 
         for batch_num in range(n_batches):
             logger.info(f"UG generating batch {batch_num + 1}/{n_batches}")
             batch_result = await self.generate_batch_ultimatum(
-                game,
-                topic,
-                world_type,
-                actor_type,
-                unique_prompt,
-                number_of_stories
+                game, topic, world_type, actor_type, unique_prompt, number_of_stories
             )
-            
+
             if batch_result.stories:
                 all_stories.extend(batch_result.stories)
                 unique_prompt = batch_result.unique_prompt
@@ -407,11 +410,11 @@ Example story ending:
         return all_stories[:n_stories]
 
     def _extract_ultimatum(
-        self, 
-        text: str, 
-        total_amount: int
+        self,
+        text: str,
+        total_amount: int,
     ) -> Tuple[Optional[int], Optional[str]]:
-        offer = self._extract_offer(text)
+        offer    = self._extract_offer(text)
         response = self._extract_response(text)
 
         if offer is not None:
@@ -448,19 +451,22 @@ Example story ending:
         if m:
             logger.debug(f"Extracted response: {m.group(1)}")
             return m.group(1)
-        
+
         m2 = re.search(r'<decision>\s*(accept|reject)\s*</decision>', text, re.IGNORECASE)
         if m2:
             logger.debug(f"Extracted decision as response: {m2.group(1)}")
             return m2.group(1)
-        
+
         logger.debug("No <response> or <decision> found for UG")
         return None
-    
 
+
+# ---------------------------------------------------------------------------
+# Public Goods Game generator
+# ---------------------------------------------------------------------------
 
 class PGGStoryGenerator(StoryGenerator):
-    
+
     def create_query_pgg(
         self,
         game: PublicGoodsGame,
@@ -468,19 +474,20 @@ class PGGStoryGenerator(StoryGenerator):
         world_type: str,
         actor_type: str,
         unique_prompt: str = "",
-        number_of_stories: int = 10
+        number_of_stories: int = 10,
     ) -> str:
         logger.debug("Creating PGG query prompt")
-        endowment = game.endowment
-        multiplier = game.multiplier
-        num_players = game.num_players
-        
+        endowment    = game.effective_endowment      # stakes-scaled endowment
+        multiplier   = game.multiplier
+        num_players  = game.num_players
+        stakes_label = _STAKES_LABEL[game.stakes]
+
         prompt = f"""Write {number_of_stories} unique stories about {num_players} people deciding how much to contribute to a shared project or pool.
 
 IMPORTANT: Each story MUST be wrapped in <story></story> tags.
 
 Setup:
-- {num_players} people each have ${endowment}
+- {num_players} people each have ${endowment} — this is a {stakes_label} scenario; write accordingly.
 - Each person secretly decides how much to contribute (anywhere from $0 to ${endowment})
 - All contributions go into a shared pool
 - The pool is multiplied by {multiplier}
@@ -524,7 +531,7 @@ You are Sarah in this scenario. You have $20. How much will you contribute (0 to
 </story>
 
 Now write {number_of_stories} unique stories following this exact format."""
-        
+
         prompt = textwrap.dedent(prompt)
         logger.debug(f"Created PGG prompt length {len(prompt)}")
         return prompt
@@ -536,7 +543,7 @@ Now write {number_of_stories} unique stories following this exact format."""
         world_type: str,
         actor_type: str,
         unique_prompt: str = "",
-        number_of_stories: int = 10
+        number_of_stories: int = 10,
     ) -> BatchGenerationResult:
         logger.info("Generating PGG batch of stories")
         prompt = self.create_query_pgg(
@@ -549,34 +556,34 @@ Now write {number_of_stories} unique stories following this exact format."""
             if isinstance(content, dict):
                 content = str(content)
             logger.debug(f"PGG generated content length: {len(content)}")
-            
+
             story_pattern = r'<story>(.*?)</story>'
             raw_stories = re.findall(story_pattern, content, re.DOTALL)
             logger.info(f"Extracted {len(raw_stories)} stories for PGG")
-            
+
             if not raw_stories:
                 logger.warning("No PGG stories found")
                 return BatchGenerationResult([], [], "")
 
             stories = []
             for story_content in raw_stories:
-                contribution = self._extract_contribution(story_content, game.endowment)
+                contribution = self._extract_contribution(story_content, game.effective_endowment)
                 decision_field = str(contribution) if contribution is not None else None
-                
+
                 story = Story(
                     content=story_content.strip(),
                     topic=topic,
                     world_type=world_type,
                     actor_type=actor_type,
                     prompt=prompt,
-                    decision=decision_field
+                    decision=decision_field,
                 )
                 stories.append(story)
-            
+
             summaries = await asyncio.gather(
                 *[self.generate_story_summary(s.content) for s in stories]
             )
-            
+
             new_unique_prompt = self.generate_unique_prompt(summaries)
             logger.info(f"PGG batch created {len(stories)} stories")
             return BatchGenerationResult(stories, summaries, new_unique_prompt)
@@ -592,10 +599,10 @@ Now write {number_of_stories} unique stories following this exact format."""
         world_type: str,
         actor_type: str,
         n_stories: int = 100,
-        batch_size: int = 10
+        batch_size: int = 10,
     ) -> List[Story]:
         logger.info(f"Starting PGG generation of {n_stories} stories")
-        
+
         if topic not in TOPICS:
             raise ValueError(f"Invalid topic. Must be one of: {TOPICS}")
         if world_type not in WORLD_DICT:
@@ -603,26 +610,17 @@ Now write {number_of_stories} unique stories following this exact format."""
         if actor_type not in ACTOR_TYPES:
             raise ValueError(f"Invalid actor type. Must be one of: {list(ACTOR_TYPES.keys())}")
 
-        all_stories = []
+        all_stories: List[Story] = []
         unique_prompt = ""
         n_batches = (n_stories + batch_size - 1) // batch_size
-        
-        if n_stories < 10:
-            number_of_stories = n_stories
-        else:
-            number_of_stories = 10
+        number_of_stories = n_stories if n_stories < 10 else 10
 
         for batch_num in range(n_batches):
             logger.info(f"PGG generating batch {batch_num + 1}/{n_batches}")
             batch_result = await self.generate_batch_pgg(
-                game,
-                topic,
-                world_type,
-                actor_type,
-                unique_prompt,
-                number_of_stories
+                game, topic, world_type, actor_type, unique_prompt, number_of_stories
             )
-            
+
             if batch_result.stories:
                 all_stories.extend(batch_result.stories)
                 unique_prompt = batch_result.unique_prompt
@@ -643,13 +641,12 @@ Now write {number_of_stories} unique stories following this exact format."""
                 if 0 <= contrib <= max_contribution:
                     logger.debug(f"Extracted contribution: {contrib}")
                     return contrib
-                else:
-                    logger.warning(f"Contribution {contrib} out of range 0..{max_contribution}")
-                    return None
+                logger.warning(f"Contribution {contrib} out of range 0..{max_contribution}")
+                return None
             except ValueError:
                 logger.warning(f"Invalid contribution format: {m.group(1)}")
                 return None
-        
+
         m2 = re.search(r'<decision>\s*([0-9]+)\s*</decision>', text, re.IGNORECASE)
         if m2:
             try:
@@ -657,12 +654,11 @@ Now write {number_of_stories} unique stories following this exact format."""
                 if 0 <= contrib <= max_contribution:
                     logger.debug(f"Extracted contribution from decision tag: {contrib}")
                     return contrib
-                else:
-                    logger.warning(f"Decision {contrib} out of range 0..{max_contribution}")
-                    return None
+                logger.warning(f"Decision {contrib} out of range 0..{max_contribution}")
+                return None
             except ValueError:
                 logger.warning(f"Invalid decision format: {m2.group(1)}")
                 return None
-        
+
         logger.debug("No <contribution> or <decision> found for PGG")
         return None

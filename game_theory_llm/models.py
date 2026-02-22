@@ -1,9 +1,15 @@
 # game_theory_llm/models.py
-from dataclasses import dataclass
-from typing import List, Tuple
+from dataclasses import dataclass, field
+from typing import List, Tuple, Dict, Any, Optional
 from datetime import datetime
-from typing import List, Tuple, Dict, Any
 from abc import ABC, abstractmethod
+from enum import Enum
+
+
+class Stakes(Enum):
+    LOW    = 1
+    MEDIUM = 5
+    HIGH   = 25
 
 
 class Game(ABC):
@@ -18,15 +24,15 @@ class Game(ABC):
     def compute_payoffs(self, actions: Dict[int, Any]):
         pass
 
+
 @dataclass
 class PayoffMatrix:
-    """Represents a 2x2 payoff matrix for game theory scenarios."""
     matrix: List[Tuple[int, int]]
-    
+
     def __post_init__(self):
         if len(self.matrix) != 4:
             raise ValueError("Payoff matrix must contain exactly 4 scenarios")
-    
+
     def format_matrix(self) -> str:
         """Returns a formatted string representation of the payoff matrix."""
         return f"""
@@ -41,64 +47,70 @@ class PayoffMatrix:
 └──────────────┴─────────────┴─────────────┘
 """
 
+
 @dataclass
 class UltimatumGame(Game):
-    total_amount: int = 100
 
-    name: str = "Ultimatum Game"
-    num_players: int = 2
+    total_amount: int = 100
+    stakes: Stakes = Stakes.LOW
+
+    name: str = field(default="Ultimatum Game", init=False, repr=False)
+    num_players: int = field(default=2, init=False, repr=False)
+
+    @property
+    def effective_total(self) -> int:
+        return self.total_amount * self.stakes.value
 
     def get_actions(self, player_id: int):
         if player_id == 0:
-            return list(range(self.total_amount + 1)) 
+            return list(range(self.effective_total + 1))
         else:
             return ["accept", "reject"]
 
-    def compute_payoffs(self, actions: Dict[int, Any]):
-        offer = actions[0]
+    def compute_payoffs(self, actions: Dict[int, Any]) -> Dict[int, int]:
+        offer    = actions[0]
         response = actions[1]
-
         if response == "accept":
-            return {
-                0: self.total_amount - offer,
-                1: offer,
-            }
-        else:
-            return {
-                0: 0,
-                1: 0,
-            }
+            return {0: self.effective_total - offer, 1: offer}
+        return {0: 0, 1: 0}
+
+
 @dataclass
 class PublicGoodsGame(Game):
     num_players: int = 4
     endowment: int = 20
     multiplier: float = 1.6
-    
-    name: str = "Public Goods Game"
+    stakes: Stakes = Stakes.LOW
+
+    name: str = field(default="Public Goods Game", init=False, repr=False)
+
+    @property
+    def effective_endowment(self) -> int:
+        return self.endowment * self.stakes.value
 
     def get_actions(self, player_id: int):
-        return list(range(self.endowment + 1))
+        return list(range(self.effective_endowment + 1))
 
-    def compute_payoffs(self, actions: Dict[int, Any]):
+    def compute_payoffs(self, actions: Dict[int, Any]) -> Dict[int, float]:
         total_contribution = sum(actions.values())
-        pool_value = total_contribution * self.multiplier
-        per_player_share = pool_value / self.num_players
-        
-        payoffs = {}
-        for player_id, contribution in actions.items():
-            payoffs[player_id] = self.endowment - contribution + per_player_share
-        
-        return payoffs
+        pool_value         = total_contribution * self.multiplier
+        per_player_share   = pool_value / self.num_players
+
+        return {
+            player_id: self.effective_endowment - contribution + per_player_share
+            for player_id, contribution in actions.items()
+        }
+
+
 @dataclass
 class Story:
-    """A generated story and its metadata."""
     content: str
     topic: str
     world_type: str
     actor_type: str
-    prompt: str = None
-    decision: str = None
-    timestamp: datetime = None
+    prompt: Optional[str] = None
+    decision: Optional[str] = None
+    timestamp: Optional[datetime] = None
 
     def __post_init__(self):
         if self.timestamp is None:

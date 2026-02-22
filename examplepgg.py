@@ -1,12 +1,13 @@
 # example_pgg.py
 import asyncio
-from game_theory_llm import PublicGoodsGame, PGGStoryGenerator, APIClient
+from game_theory_llm import PublicGoodsGame, PGGStoryGenerator, APIClient, Stakes
 
 async def main():
     game = PublicGoodsGame(
         num_players=4,
         endowment=20,
-        multiplier=1.6
+        multiplier=1.6,
+        stakes=Stakes.LOW,  
     )
 
     api_client = APIClient()
@@ -17,7 +18,7 @@ async def main():
         game=game,
         topic="business",
         world_type="real world",
-        actor_type="allies",
+        actor_type="neutral",
         n_stories=1
     )
     
