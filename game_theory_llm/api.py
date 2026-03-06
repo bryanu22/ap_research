@@ -79,7 +79,7 @@ class APIClient:
         self.client_2 = AsyncTogether(api_key=self.api_key_2) if self.api_key_2 else None
         
         # Initialize other clients
-        self.claude_client = AsyncAnthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+        self.claude_client = AsyncAnthropic(api_key=os.getenv('CLAUDE_API_KEY'))
         self.openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
         # Rate limiting setup for both Together AI instances (70% of limits for safety)
@@ -136,7 +136,6 @@ class APIClient:
         return True, 0
 
     async def _try_llama_request(self, prompt: str, client, api_key_type: str):
-        """Attempt a request with specified client and handle rate limits."""
         estimated_input_tokens = len(prompt) // 2
         can_proceed, wait_time = await self._enforce_rate_limits(api_key_type, estimated_input_tokens)
         
@@ -151,7 +150,6 @@ class APIClient:
                 temperature=0.0
             )
             
-            # Update token usage with actual usage
             actual_tokens = response.usage.total_tokens
             limits = self.rate_limits[api_key_type]
             if limits['token_usage']:
@@ -161,7 +159,7 @@ class APIClient:
             
         except Exception as e:
             if "rate_limit" in str(e).lower() or "429" in str(e):
-                return False, 3, None  # Base wait time for rate limits
+                return False, 3, None 
             raise
 
     async def generate(self, prompt: str, model: str = "all") -> Dict[str, str]:
@@ -184,7 +182,7 @@ class APIClient:
             ])
 
         try:
-            # Llama (Together AI)
+
             if model in ["all", "llama"]:
                 for attempt in range(max_retries):
                     # Try primary API first
@@ -203,8 +201,7 @@ class APIClient:
                             responses["llama"] = response.choices[0].message.content
                             break
                         wait_time = min(wait_time, secondary_wait)
-                    
-                    # If both failed and we haven't maxed out retries, wait and try again
+
                     if attempt < max_retries - 1:
                         wait_time = (base_wait ** (attempt + 1)) + random.uniform(1, 5)
                         logger.warning(
@@ -216,12 +213,11 @@ class APIClient:
                         logger.error(f"Max retries ({max_retries}) reached for Llama API")
                         responses["llama"] = None
 
-            # Claude
             if model in ["all", "claude"]:
                 for attempt in range(max_retries):
                     try:
                         claude_response = await self.claude_client.messages.create(
-                            model=" ",
+                            model="claude-sonnet-4-6",
                             max_tokens=4096,
                             temperature=0.0,
                             messages=[{"role": "user", "content": prompt}]
@@ -246,8 +242,8 @@ class APIClient:
                 for attempt in range(max_retries):
                     try:
                         gpt_response = await self.openai_client.chat.completions.create(
-                            model="gpt-4o-2024-11-20",
-                            max_tokens=4096,
+                            model="gpt-5.2",
+                            max_completion_tokens=4096, 
                             temperature=0.0,
                             messages=[{"role": "user", "content": prompt}]
                         )

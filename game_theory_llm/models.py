@@ -1,4 +1,3 @@
-# game_theory_llm/models.py
 from dataclasses import dataclass, field
 from typing import List, Tuple, Dict, Any, Optional
 from datetime import datetime
@@ -34,7 +33,6 @@ class PayoffMatrix:
             raise ValueError("Payoff matrix must contain exactly 4 scenarios")
 
     def format_matrix(self) -> str:
-        """Returns a formatted string representation of the payoff matrix."""
         return f"""
 ┌──────────────┬─────────────┬─────────────┐
 │ Agent 1 ↓    │  Agent 2 →  │             │
@@ -49,9 +47,61 @@ class PayoffMatrix:
 
 
 @dataclass
-class UltimatumGame(Game):
+class PrisonersDilemmaGame(Game):
+    stakes: Stakes = Stakes.LOW
 
-    total_amount: int = 100
+    BASE_REWARD: int = field(default=4, init=False, repr=False)
+    name: str = field(default="Prisoner's Dilemma", init=False, repr=False)
+    num_players: int = field(default=2, init=False, repr=False)
+
+    @property
+    def reward(self) -> int:
+        return self.BASE_REWARD * self.stakes.value
+
+    @property
+    def temptation(self) -> int:
+        return int(self.reward * 1.5)
+
+    @property
+    def punishment(self) -> int:
+        return int(self.reward * 0.5)
+
+    @property
+    def sucker(self) -> int:
+        return 0
+
+    @property
+    def payoff_matrix(self) -> PayoffMatrix:
+        R = self.reward
+        T = self.temptation
+        P = self.punishment
+        S = self.sucker
+        return PayoffMatrix([
+            (R, R),
+            (S, T),
+            (T, S),
+            (P, P),
+        ])
+
+    def get_actions(self, player_id: int):
+        return ["cooperate", "defect"]
+
+    def compute_payoffs(self, actions: Dict[int, Any]) -> Dict[int, int]:
+        a0 = actions[0]
+        a1 = actions[1]
+        R, T, P, S = self.reward, self.temptation, self.punishment, self.sucker
+        if a0 == "cooperate" and a1 == "cooperate":
+            return {0: R, 1: R}
+        if a0 == "cooperate" and a1 == "defect":
+            return {0: S, 1: T}
+        if a0 == "defect" and a1 == "cooperate":
+            return {0: T, 1: S}
+        return {0: P, 1: P}
+
+
+@dataclass
+class UltimatumGame(Game):
+    total_amount: int = 20
     stakes: Stakes = Stakes.LOW
 
     name: str = field(default="Ultimatum Game", init=False, repr=False)
@@ -64,8 +114,7 @@ class UltimatumGame(Game):
     def get_actions(self, player_id: int):
         if player_id == 0:
             return list(range(self.effective_total + 1))
-        else:
-            return ["accept", "reject"]
+        return ["accept", "reject"]
 
     def compute_payoffs(self, actions: Dict[int, Any]) -> Dict[int, int]:
         offer    = actions[0]
@@ -95,7 +144,6 @@ class PublicGoodsGame(Game):
         total_contribution = sum(actions.values())
         pool_value         = total_contribution * self.multiplier
         per_player_share   = pool_value / self.num_players
-
         return {
             player_id: self.effective_endowment - contribution + per_player_share
             for player_id, contribution in actions.items()
